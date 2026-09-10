@@ -19,17 +19,15 @@ No font service or extra runtime dependency is needed for the balloon letters.
 
 ## Where the love lives
 
-**Live: GitHub Pages for the frontend, your Docker server for storage.**
-Website: https://vtemuedra.github.io/baby-welcome/
-Storage API: https://atlas-api.aboutvincent.com/api
+**One server, one site: Docker hosts the website, login, API, and storage.**
+Website: https://atlas.aboutvincent.com/
+API: https://atlas.aboutvincent.com/api
 See [the server runbook](deploy/README.md) for the installed stack and backups.
 
-GitHub Pages serves files; it cannot receive or store visitor uploads by itself.
-The small Node API stores messages, normalized photos, and hearts together in
-SQLite on a persistent Docker volume. No Firebase or external database account.
-
-You can also host the entire site in the same Docker container on your own domain.
-That is simpler if you prefer a single deployment. The Pages setup is optional.
+The Node server serves the built website and stores messages, normalized photos,
+and hearts together in SQLite on a persistent Docker volume. No Firebase,
+separate API host, or external database account is needed. GitHub stores the
+source; its old Pages address only forwards visitors to the server-hosted site.
 
 Messages are not stored only in the visitor's browser. Local storage holds only
 unfinished text drafts, a random visitor ID, heart selections, and motion preference.
@@ -71,13 +69,13 @@ The Mac development setup does not require Docker.
 
 1. Set up the project on your server and create an untracked `.env` using
    `.env.example` as the template.
-2. Set `SITE_ORIGIN=https://vtemuedra.github.io`. This is the origin only,
-   not the `/baby-welcome/` path. Multiple origins can be comma-separated.
+2. Set `SITE_ORIGIN=https://atlas.aboutvincent.com`. Use your site's origin only.
+  Multiple same-site deployment origins can be comma-separated.
 3. Set `WRITE_KEY` to a private team invite code. Share it with guests separately.
    Never put it in a `VITE_` variable, URL, GitHub variable, or committed file.
 4. Set `TRUST_PROXY=1` when using exactly one reverse proxy in front of the app.
    This makes rate limits apply to visitors, not the whole team as one address.
-5. Point an API subdomain at the server and run:
+5. Point the site's domain at the server and run:
 
 ```sh
 docker compose up -d --build
@@ -93,45 +91,31 @@ Check `https://YOUR-API-DOMAIN/api/health` returns `ok: true`.
 The compose configuration requires the origin and invite code, so it cannot
 accidentally start in the open local-development mode.
 
-## Publish to vtemuedra's GitHub Pages
+## GitHub and the old link
 
 Source repository: https://github.com/vtemuedra/baby-welcome (public).
-GitHub Pages and the Docker storage service are deployed. The repository was
-made public with the owner's approval because the current GitHub plan does not
-support Pages for a private repository. Stored uploads and secrets remain on
-the server, not in GitHub.
+The repository remains public as previously approved. Messages, photos, session
+cookies, and the invite code are never committed. The `Check Atlas` workflow
+validates source changes; updating the Docker server is a separate deployment.
 
-The current Pages configuration is:
-- `VITE_API_URL=https://atlas-api.aboutvincent.com/api`
-- `VITE_BASE_PATH=/baby-welcome/`
-
-To reproduce the setup:
-
-1. Deploy the Docker storage service and verify its HTTPS endpoint first.
-  Data, environment secrets, backups, and test artifacts stay out of GitHub.
-2. In repository **Settings > Pages**, select **GitHub Actions** as the source.
-3. Under **Settings > Secrets and variables > Actions > Variables**, set
-   `VITE_API_URL` to `https://YOUR-API-DOMAIN/api`.
-4. The workflow defaults to `/baby-welcome/`. For a different repository name,
-   set the `VITE_BASE_PATH` variable to `/<repository-name>/`.
-   For a custom Pages domain, set it to `/` and configure the domain in Pages.
-5. Run **Publish Atlas to GitHub Pages** or push to `main`.
-
-Live site URL: https://vtemuedra.github.io/baby-welcome/.
-Pages hosting from a private repository requires an eligible GitHub plan.
-A private source repository does not make a standard Pages site private.
-The all-in-one Docker option below does not require Pages or a paid GitHub plan.
-The workflow skips deployment while the API URL is unset and rejects non-HTTPS URLs.
-No GitHub access token or private invite code belongs in the browser bundle.
-
-For an all-in-one Docker deployment, use your site domain in `SITE_ORIGIN`,
-proxy that domain to port 8105, and leave all `VITE_` variables unset.
-No GitHub Pages deployment is needed in that case.
+https://vtemuedra.github.io/baby-welcome/ now hosts only a tiny forwarding page
+from `deploy/pages-redirect/`. The `Forward old Atlas link` workflow maintains it.
+The real application is not built or hosted on GitHub Pages anymore, and does
+not use `VITE_API_URL` or `VITE_BASE_PATH`.
 
 ## Privacy and care
 
-- **The board and photos are public.** The invite code protects posting and
-  hearts, not viewing. Obtain the family's approval before sharing the link.
+- **The board and photos require the shared invite code.** Guests enter it once
+  on the welcome screen, with no email or account. Access lasts up to 24 hours
+  using a host-only HttpOnly cookie, Secure on HTTPS, with SameSite=Strict.
+  Sessions survive container restarts; sign-out revokes the current session.
+  Changing `WRITE_KEY` invalidates existing sessions. Guests can still save or
+  share content, so obtain the family's approval before sharing the invitation.
+- Protected API responses and photos use no-store caching. Copies downloaded or
+  cached while the old board was public cannot be recalled.
+- Ten failed code guesses per IP in 15 minutes trigger a temporary rate limit.
+  An expired session returns to the welcome screen; unfinished text is kept on
+  the device, but an attached photo must be selected again.
 - Photos must be JPG, PNG, or WebP and at most 6 MB. The server validates the
   decoded image, limits dimensions, removes metadata including GPS information,
   and stores a resized WebP. HEIC photos need to be exported as JPG first.

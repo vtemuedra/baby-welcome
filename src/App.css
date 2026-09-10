@@ -1,4 +1,37 @@
 .site { overflow: clip; }
+.invite-page { min-height: 100svh; display: flex; flex-direction: column; background: #e5eff2; background-image: radial-gradient(#849fa829 0.7px, transparent 0.7px); background-size: 7px 7px; }
+.invite-header { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 25px 4.2%; }
+.invite-header > .handwritten { font-size: 23px; color: #667763; transform: rotate(-3deg); }
+.invite-main { flex: 1; width: min(100%, 580px); margin: auto; padding: 26px 26px 40px; text-align: center; }
+.invite-ornament { position: relative; width: 144px; height: 115px; margin: 0 auto 24px; }
+.invite-flower { position: absolute; width: 95px; height: 95px; left: 24px; top: 12px; color: #ae654f; fill: #f0b7bf; stroke-width: 1; transform: rotate(-12deg); }
+.invite-star { position: absolute; width: 32px; height: 32px; left: 0; top: 0; fill: #edcd68; color: #a9863f; transform: rotate(-15deg); }
+.invite-heart { position: absolute; width: 27px; height: 27px; right: 0; bottom: 0; fill: #9fb78c; color: #69815c; transform: rotate(15deg); }
+.invite-main h1 { font: 500 54px / 1.12 var(--serif); margin: 16px 0; }
+.invite-main h1 em { color: var(--coral); }
+.invite-greeting { color: #607069; font-size: 14px; line-height: 1.6; }
+.invite-form { max-width: 340px; margin: 31px auto 0; text-align: left; }
+.invite-form > label { display: block; font-size: 12px; font-weight: 650; margin-bottom: 8px; }
+.invite-code-input { display: flex; position: relative; }
+.invite-code-input > input { width: 100%; padding-right: 48px; font-size: 16px; background: #fffefa; }
+.invite-code-input > button { position: absolute; right: 4px; top: 4px; }
+.invite-form > .button { width: 100%; margin-top: 17px; }
+.invite-form .form-error { margin: 12px 0 0; }
+.invite-signoff { display: block; margin-top: 37px; font-size: 25px; color: #798665; transform: rotate(-3deg); }
+.invite-check, .invite-retry { min-height: 145px; margin-top: 30px; }
+.invite-check { display: flex; align-items: center; justify-content: center; gap: 10px; color: #607069; font-size: 13px; }
+.invite-footer { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 7px; padding: 22px; background: #f5d9db; color: #815e55; font-size: 11px; }
+.invite-footer strong { font-weight: 600; }
+.invite-footer > svg { margin-left: 4px; }
+@media (max-width: 520px) {
+  .invite-header { padding: 23px; }
+  .invite-header > .handwritten { display: none; }
+  .invite-main { padding-top: 14px; }
+  .invite-main h1 { font-size: 42px; }
+  .invite-ornament { height: 98px; margin-bottom: 19px; }
+  .invite-flower { height: 83px; width: 83px; }
+  .invite-signoff { font-size: 23px; }
+}
 .skip-link { position: fixed; left: 12px; top: -100px; z-index: 100; padding: 12px; background: white; }
 .skip-link:focus { top: 12px; }
 .site-header { height: 84px; max-width: 1600px; margin: auto; padding: 0 4.2%; display: flex; align-items: center; justify-content: space-between; gap: 20px; }

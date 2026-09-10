@@ -4,22 +4,29 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import sharp from 'sharp'
 
-const base = new URL(process.env.ATLAS_PUBLIC_API || 'https://atlas-api.aboutvincent.com/api')
+const base = new URL(process.env.ATLAS_PUBLIC_API || 'https://atlas.aboutvincent.com/api')
 assert.equal(base.protocol, 'https:')
 assert(process.env.WRITE_KEY, 'Run inside the Atlas container with its existing invite configuration.')
 const probeName = `Deployment check ${randomUUID()}`
 const database = new DatabaseSync(path.join(process.env.DATA_DIR || '/app/data', 'atlas.sqlite'), { open: true })
 database.exec('PRAGMA foreign_keys = ON')
-const origin = 'https://vtemuedra.github.io'
-const headers = { 'Content-Type': 'application/json', Origin: origin, 'X-Invite-Key': process.env.WRITE_KEY }
+const origin = base.origin
+const headers = { 'Content-Type': 'application/json', Origin: origin }
 const request = (route, options = {}) => fetch(`${base.href.replace(/\/$/, '')}${route}`, {
-  ...options, signal: AbortSignal.timeout(30_000),
+  ...options, headers: { ...headers, ...options.headers }, signal: AbortSignal.timeout(30_000),
 })
 let messageId
 try {
   const health = await request('/health')
   assert.equal(health.status, 200)
   assert.equal((await health.json()).inviteRequired, true)
+  assert.equal((await request('/messages')).status, 401)
+  const session = await request('/session', { method: 'POST', body: JSON.stringify({ code: process.env.WRITE_KEY }) })
+  assert.equal(session.status, 200)
+  const cookie = session.headers.get('set-cookie')
+  assert(cookie.includes('HttpOnly') && cookie.includes('Secure') && cookie.includes('SameSite=Strict'))
+  assert.equal((await session.json()).token, undefined)
+  headers.Cookie = cookie.split(';')[0]
   const image = await sharp(randomBytes(800 * 800 * 3), { raw: { width: 800, height: 800, channels: 3 } }).png().toBuffer()
   assert(image.length > 1024 * 1024)
   const result = await request('/messages', { method: 'POST', headers, body: JSON.stringify({
@@ -44,10 +51,14 @@ try {
   })
   assert.equal(heart.status, 200)
   assert.equal((await heart.json()).hearts, 1)
-  console.log('PASS: public HTTPS photo upload above 1 MB, shared retrieval, WebP conversion, CORS, and hearts.')
+  console.log('PASS: same-site HTTPS login, secure HttpOnly cookie, protected upload above 1 MB, photo retrieval, and hearts.')
 } finally {
   const removed = database.prepare('DELETE FROM messages WHERE name = ?').run(probeName)
   database.close()
   console.log(`Removed ${removed.changes} synthetic note(s), including photo and hearts. Invite code was not printed.`)
+  if (headers.Cookie) {
+    await request('/session', { method: 'DELETE' })
+    assert.equal((await request('/messages')).status, 401)
+  }
 }
-if (messageId) assert.equal((await request(`/photos/${messageId}`)).status, 404)
+if (messageId) assert.equal((await request(`/photos/${messageId}`)).status, 401)

@@ -1,8 +1,9 @@
-import { randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import express from 'express'
+import cookieParser from 'cookie-parser'
 import helmet from 'helmet'
 import { rateLimit } from 'express-rate-limit'
 import sharp from 'sharp'
@@ -31,10 +32,14 @@ export function createApp({ dataDir, siteOrigin = '', writeKey = '', staticDir, 
       message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
       visitor_id TEXT NOT NULL, PRIMARY KEY (message_id, visitor_id)
     );
+    CREATE TABLE IF NOT EXISTS sessions (
+      token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL
+    );
   `)
   const app = express()
   app.disable('x-powered-by')
   app.set('trust proxy', trustProxy)
+  app.use(cookieParser())
   app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: 'cross-origin' } }))
   const origins = siteOrigin.split(',').map((origin) => origin.trim()).filter(Boolean)
   app.use('/api', (request, response, next) => {
@@ -47,23 +52,56 @@ export function createApp({ dataDir, siteOrigin = '', writeKey = '', staticDir, 
       response.set('Access-Control-Allow-Origin', origin)
       response.vary('Origin')
     }
-    response.set('Access-Control-Allow-Headers', 'Content-Type, X-Invite-Key')
-    response.set('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS')
+    response.set('Access-Control-Allow-Headers', 'Content-Type')
+    response.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
     response.set('Cache-Control', 'no-store')
     if (request.method === 'OPTIONS') return response.sendStatus(204)
     next()
   })
-  app.use('/api', express.json({ limit: '9mb' }))
+  const sessionHash = (token) => createHmac('sha256', writeKey).update(token).digest('hex')
+  const cookieOptions = (request) => ({ httpOnly: true, secure: request.secure, sameSite: 'strict', path: '/api' })
+  function sessionToken(request) {
+    const token = request.cookies['atlas-session']
+    return typeof token === 'string' && /^[a-f0-9]{64}$/.test(token) ? token : ''
+  }
+  function authenticated(request) {
+    if (!writeKey) return true
+    const token = sessionToken(request)
+    return Boolean(token && database.prepare('SELECT 1 FROM sessions WHERE token_hash = ? AND expires_at > ?')
+      .get(sessionHash(token), Date.now()))
+  }
+  function authorize(request, response, next) {
+    if (!authenticated(request)) return response.status(401).json({ error: 'Your invitation needs a quick check. Enter the team code to come in.' })
+    next()
+  }
+  const logins = rateLimit({ windowMs: 15 * 60_000, limit: 10, skipSuccessfulRequests: true,
+    standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'Too many guesses. Give it 15 minutes, then try again.' } })
+  app.get('/api/health', (_request, response) => response.json({ ok: true, inviteRequired: Boolean(writeKey) }))
+  app.get('/api/session', (request, response) => response.json({ authenticated: authenticated(request), inviteRequired: Boolean(writeKey) }))
+  app.post('/api/session', logins, express.json({ limit: '1kb' }), (request, response) => {
+    const code = request.body?.code
+    if (typeof code !== 'string' || code.length > 512 || (writeKey && !matchesKey(code, writeKey))) {
+      return response.status(401).json({ error: "That code isn't quite right. Try the one from the team." })
+    }
+    if (!writeKey) return response.json({ authenticated: true })
+    database.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(Date.now())
+    const token = randomBytes(32).toString('hex')
+    const expiresAt = Date.now() + 24 * 60 * 60_000
+    database.prepare('INSERT INTO sessions VALUES (?, ?)').run(sessionHash(token), expiresAt)
+    response.cookie('atlas-session', token, { ...cookieOptions(request), maxAge: 24 * 60 * 60_000 })
+    response.json({ authenticated: true, expiresAt })
+  })
+  app.delete('/api/session', (request, response) => {
+    const token = sessionToken(request)
+    if (token) database.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sessionHash(token))
+    response.clearCookie('atlas-session', cookieOptions(request))
+    response.json({ authenticated: false })
+  })
+  app.use('/api', authorize, express.json({ limit: '9mb' }))
   const writes = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false,
     message: { error: 'A little breather! Try again in a minute.' } })
   const uploads = rateLimit({ windowMs: 3_600_000, limit: 12, standardHeaders: 'draft-8', legacyHeaders: false,
     message: { error: 'So much love! Try adding another note in an hour.' } })
-  function authorize(request, response, next) {
-    if (writeKey && !matchesKey(request.get('x-invite-key'), writeKey)) {
-      return response.status(401).json({ error: 'Pop in the invite code from the team to post.' })
-    }
-    next()
-  }
   const selectMessages = database.prepare(`
     SELECT id, name, body, color, sticker, created_at AS createdAt,
       photo IS NOT NULL AS hasPhoto,
@@ -73,17 +111,16 @@ export function createApp({ dataDir, siteOrigin = '', writeKey = '', staticDir, 
   function serialize(row) {
     return { ...row, hasPhoto: Boolean(row.hasPhoto) }
   }
-  app.get('/api/health', (_request, response) => response.json({ ok: true, inviteRequired: Boolean(writeKey) }))
   app.get('/api/messages', (_request, response) => {
     response.json({ messages: selectMessages.all().map(serialize) })
   })
   app.get('/api/photos/:id', (request, response) => {
     const message = database.prepare('SELECT photo FROM messages WHERE id = ?').get(request.params.id)
     if (!message?.photo) return response.status(404).json({ error: 'Photo not found.' })
-    response.set('Cache-Control', 'public, max-age=31536000, immutable')
+    response.set('Cache-Control', 'private, no-store')
     response.type('webp').send(Buffer.from(message.photo))
   })
-  app.post('/api/messages', writes, authorize, uploads, async (request, response, next) => {
+  app.post('/api/messages', writes, uploads, async (request, response, next) => {
     try {
       const { name, body, color, sticker, photo } = request.body || {}
       if (typeof name !== 'string' || !name.trim() || name.trim().length > 60 ||
@@ -118,7 +155,7 @@ export function createApp({ dataDir, siteOrigin = '', writeKey = '', staticDir, 
         createdAt, hasPhoto: Boolean(normalizedPhoto), hearts: 0 } })
     } catch (error) { next(error) }
   })
-  app.put('/api/messages/:id/heart', writes, authorize, (request, response) => {
+  app.put('/api/messages/:id/heart', writes, (request, response) => {
     const { visitorId, active } = request.body || {}
     if (typeof visitorId !== 'string' || !/^[a-f0-9-]{36}$/i.test(visitorId) || typeof active !== 'boolean') {
       return response.status(400).json({ error: 'Something went sideways. Refresh and try again.' })

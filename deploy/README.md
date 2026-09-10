@@ -2,8 +2,9 @@
 
 ## Live Setup
 
-- Website: https://vtemuedra.github.io/baby-welcome/
-- API: https://atlas-api.aboutvincent.com/api
+- Website and login: https://atlas.aboutvincent.com/
+- Same-origin API: https://atlas.aboutvincent.com/api
+- Old GitHub Pages link: forwarding page only, not a second app deployment.
 - Installed project: `~/Docker/baby-welcome` on the Linux Docker server.
 - Compose file: `deploy/compose.server.yaml`, project name `baby-welcome`.
 - Persistent SQLite database and photos: Docker volume `baby-welcome_atlas-data`.
@@ -15,8 +16,9 @@ its own SQLite database and does not depend on those apps.
 
 ## Proxy and HTTPS
 
-Nginx Proxy Manager host #24 routes `atlas-api.aboutvincent.com` to
-`http://atlas-api:8105`, with a dedicated Let's Encrypt certificate.
+Nginx Proxy Manager routes `atlas.aboutvincent.com` to `http://atlas-api:8105`,
+with a dedicated Let's Encrypt certificate. The original API hostname remains
+an alternate route to the same container, protected by the same login.
 Force SSL and HTTP/2 are enabled. Asset caching is off. Its custom configuration is:
 
 ```nginx
@@ -33,10 +35,13 @@ after changes, not just the presence of a certificate.
 The server's `~/Docker/baby-welcome/.env` is private and must never be committed.
 It contains the team invite code as `WRITE_KEY`. View or change that code directly
 on the server, not through chat or workflow logs. Share it separately with guests.
-The frontend asks for it when someone posts or adds a heart. Reading the board
-and its photos is public.
+The welcome page asks for it once. Messages, photos, posting, and hearts all
+require a valid session. The server issues a host-only HttpOnly cookie, Secure
+over HTTPS, SameSite=Strict, with a 24-hour lifetime. Only a keyed hash of the
+random session token is stored in SQLite. Login never returns the token in JSON.
+Changing the invite code invalidates existing sessions; sign-out revokes one.
 
-Allowed origins are `https://vtemuedra.github.io` and
+Allowed origins are `https://atlas.aboutvincent.com` and
 `https://atlas-api.aboutvincent.com`. `TRUST_PROXY=1` accounts for the single
 Nginx proxy between visitors and the app.
 
@@ -49,14 +54,14 @@ docker compose -f deploy/compose.server.yaml up -d --no-deps --force-recreate --
 
 ## Deploy Updates
 
-Pushing `main` publishes the frontend through GitHub Actions. It does not update
-the Docker server automatically. Copy changed source to the server without
+Pushing `main` runs source checks, not an application deployment. GitHub Pages
+only maintains a redirect for the old address. Copy changed source to the server without
 overwriting `.env` or copying runtime data, then rebuild only this stack:
 
 ```sh
 cd ~/Docker/baby-welcome
 docker compose -f deploy/compose.server.yaml up -d --build --wait atlas
-curl -fsS https://atlas-api.aboutvincent.com/api/health
+curl -fsS https://atlas.aboutvincent.com/api/health
 ```
 
 The health response should contain `ok: true` and `inviteRequired: true`.
@@ -90,8 +95,9 @@ files. Restore the matching private environment separately, then start Atlas.
 ## Verification and Removal
 
 The public HTTPS smoke check runs inside the container, keeping `WRITE_KEY`
-inside that process. It creates one synthetic photo note, checks retrieval and
-a heart, and removes only its own data in a `finally` block:
+inside that process. It verifies the login cookie's security flags, creates one
+synthetic photo note, checks retrieval and a heart, removes only its own data,
+then logs out and checks that access has been revoked:
 
 ```sh
 cd ~/Docker/baby-welcome

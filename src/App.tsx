@@ -1,10 +1,11 @@
 import { lazy, Suspense, useDeferredValue, useEffect, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react'
-import { ArrowDown, ArrowUpRight, Check, ChevronDown, Flower2, Heart, ImagePlus, LoaderCircle, PartyPopper, Pause, Play, Plus, Search, Send, Share2, Sparkles, Star, Trash2, X } from 'lucide-react'
+import { ArrowDown, ArrowUpRight, Check, ChevronDown, Flower2, Heart, ImagePlus, LoaderCircle, LogOut, PartyPopper, Pause, Play, Plus, Search, Send, Share2, Star, Trash2, X } from 'lucide-react'
 import confetti from 'canvas-confetti'
-import { ApiError, getHealth, getNotes, inviteCode, photoUrl, readPhoto, recall, remember, saveInvite, sendHeart, sendNote } from './lib/api'
+import { getNotes, photoUrl, readPhoto, recall, remember, sendHeart, sendNote } from './lib/api'
 import type { Draft, Note, NoteColor, Sticker } from './lib/api'
+import AccessGate from './AccessGate'
 import './App.css'
 
 const HeroScene = lazy(() => import('./HeroScene'))
@@ -46,8 +47,6 @@ function Composer({ onClose, onSaved, inviteRequired }: { onClose: () => void; o
         color: colors.includes(saved.color) ? saved.color : 'yellow', sticker: stickerNames.includes(saved.sticker) ? saved.sticker : 'flower' }
     } catch { return initialDraft }
   })
-  const [code, setCode] = useState(inviteCode)
-  const [needsCode, setNeedsCode] = useState(inviteRequired)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [reading, setReading] = useState(false)
@@ -70,11 +69,10 @@ function Composer({ onClose, onSaved, inviteRequired }: { onClose: () => void; o
     setBusy(true)
     setError('')
     try {
-      const { message } = await sendNote(draft, code.trim())
-      saveInvite(code.trim())
+      const { message } = await sendNote(draft)
       remember('draft', '')
       onSaved(message)
-    } catch (cause) { setError((cause as Error).message); if (cause instanceof ApiError && cause.status === 401) setNeedsCode(true) }
+    } catch (cause) { setError((cause as Error).message) }
     finally { setBusy(false) }
   }
   return <Dialog label="Leave a little love" onClose={() => { if (!busy) onClose() }} className="composer">
@@ -89,8 +87,7 @@ function Composer({ onClose, onSaved, inviteRequired }: { onClose: () => void; o
         {draft.photo ? <div className="upload-selected"><img src={draft.photo} alt="Selected upload" /><span>A little memory, attached.</span><button type="button" className="icon-button" aria-label="Remove photo" title="Remove photo" onClick={() => { photoRead.current++; setReading(false); setDraft({ ...draft, photo: undefined }) }}><Trash2 size={18} /></button></div>
           : <button type="button" disabled={reading} className={`upload-zone ${dragging ? 'is-dragging' : ''}`} onClick={() => fileInput.current?.click()} onDragOver={(event) => { event.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); void choosePhoto(event.dataTransfer.files[0]) }}>
             {reading ? <LoaderCircle className="spin" size={24} /> : <ImagePlus size={24} />}<span><strong>{reading ? 'Opening your photo...' : 'Add a photo, make it personal'}</strong><small>Optional · JPG, PNG, WebP · up to 6 MB</small></span><Plus size={18} /></button>}
-        {(needsCode || inviteRequired) && <div className="invite-field"><label htmlFor="invite-code">Team invite code</label><input id="invite-code" type="password" autoComplete="off" value={code} onChange={(event) => setCode(event.target.value)} required /></div>}
-        <p className="privacy-note">A little heads-up: this board is public. Only share photos you're happy for everyone to see.</p>{error && <p className="form-error" role="alert">{error}</p>}
+        <p className="privacy-note">{inviteRequired ? 'For everyone with the invite code. Share photos with permission; guests can save a copy.' : "A little heads-up: this board is public. Only share photos you're happy for everyone to see."}</p>{error && <p className="form-error" role="alert">{error}</p>}
         <button type="submit" className="button primary submit-note" disabled={busy || reading || !draft.name.trim() || !draft.body.trim()}>{busy ? <LoaderCircle size={18} className="spin" /> : <Send size={17} />}{busy ? 'Sending your love...' : 'Send a little love'}</button>
       </fieldset></form>
   </Dialog>
@@ -105,7 +102,7 @@ function NoteCard({ note, liked, onHeart, onPhoto }: { note: Note; liked: boolea
     <div className="note-footer"><div><span className="note-author">{note.name}</span><time dateTime={note.createdAt}>{dateFormat.format(new Date(note.createdAt))}</time></div><button type="button" className={`heart-button ${liked ? 'is-liked' : ''}`} disabled={heartBusy} aria-label={`${liked ? 'Remove love from' : 'Send love to'} ${note.name}'s note`} aria-pressed={liked} onClick={async () => { setHeartBusy(true); try { await onHeart() } finally { setHeartBusy(false) } }}><Heart size={17} /> <span>{note.hearts}</span></button></div>
   </motion.article>
 }
-function App() {
+function Party({ inviteRequired, onExit }: { inviteRequired: boolean; onExit: () => Promise<void> }) {
   const reducedMotion = useReducedMotion()
   const [paused, setPaused] = useState(() => recall('paused') === 'true')
   const motionOff = paused || Boolean(reducedMotion)
@@ -114,9 +111,7 @@ function App() {
   const [loadError, setLoadError] = useState('')
   const [composing, setComposing] = useState(false)
   const [photoNote, setPhotoNote] = useState<Note | null>(null)
-  const [inviteRequired, setInviteRequired] = useState(false)
-  const [inviteOpen, setInviteOpen] = useState(false)
-  const [code, setCode] = useState(inviteCode)
+  const [leaving, setLeaving] = useState(false)
   const [filter, setFilter] = useState<'all' | 'photos'>('all')
   const [sort, setSort] = useState('newest')
   const [query, setQuery] = useState('')
@@ -135,10 +130,9 @@ function App() {
   useEffect(() => {
     let cancelled = false
     const version = ++loadVersion.current
-    void Promise.all([getNotes(), getHealth()]).then(([result, health]) => {
+    void getNotes().then((result) => {
       if (cancelled || version !== loadVersion.current) return
       setNotes(result.messages)
-      setInviteRequired(health.inviteRequired)
     }).catch(() => {
       if (!cancelled && version === loadVersion.current) setLoadError("The love board is taking a tiny nap. We couldn't load the notes.")
     }).finally(() => {
@@ -165,7 +159,7 @@ function App() {
       const result = await sendHeart(note.id, active, visitorId)
       setNotes((current) => current.map((item) => item.id === note.id ? { ...item, hearts: result.hearts } : item))
       setLikedIds((current) => { const next = active ? [...current, note.id] : current.filter((id) => id !== note.id); remember('hearts', JSON.stringify(next)); return next })
-    } catch (cause) { if (cause instanceof ApiError && cause.status === 401) setInviteOpen(true); else setToast((cause as Error).message) }
+    } catch (cause) { setToast((cause as Error).message) }
   }
   async function share() {
     const url = new URL(location.href); url.hash = ''; url.search = ''
@@ -195,10 +189,12 @@ function App() {
         {!loading && !loadError && !showKeepsakes && shown.length === 0 && <div className="empty-state"><Flower2 size={44} /><h3>{search ? 'No notes found, little detective.' : 'The first photo could be yours.'}</h3><p>{search ? 'Try another name or a different word.' : 'A familiar face. A favorite memory. A little piece of you.'}</p><button type="button" className="button secondary" onClick={() => search ? setQuery('') : setComposing(true)}>{search ? <X size={17} /> : <ImagePlus size={17} />}{search ? 'Clear search' : 'Add a photo note'}</button></div>}
         <div className="board-bottom"><span><Heart size={14} /> A little time capsule of a very big kind of love.</span><button type="button" className="text-button" onClick={() => void share()}><Share2 size={16} /> Invite more love</button></div></section>
       <section className="dedication" aria-labelledby="dedication-title"><span className="eyebrow">NATALIE & DUKE, THIS ONE'S FOR YOU</span><h2 id="dedication-title">Tiny socks.<br /><em>Big, big love.</em></h2><p>Here's to the sleepy cuddles, the happy little surprises,<br className="desktop-break" /> and finding your own rhythm together. No perfect-parent stuff.</p><span className="handwritten">You've got each other. We're cheering you both on.</span><Flower2 className="dedication-flower" aria-hidden="true" /></section></main>
-    <footer className="site-footer"><a className="wordmark" href="#"><Flower2 size={23} /><span>hello, atlas.</span></a><span>Made of love. And a little bit of confetti.</span><span>MET Inventory & more <Heart size={13} /></span></footer>
+    <footer className="site-footer"><a className="wordmark" href="#"><Flower2 size={23} /><span>hello, atlas.</span></a><span>Made of love. And a little bit of confetti.</span><span>MET Inventory & more <Heart size={13} /></span>{inviteRequired && <button type="button" className="icon-button" disabled={leaving} aria-label="Sign out" title="Sign out" onClick={async () => { setLeaving(true); try { await onExit() } catch { setToast("Couldn't sign out just now. Please try again."); setLeaving(false) } }}><LogOut size={17} /></button>}</footer>
     {composing && <Composer inviteRequired={inviteRequired} onClose={() => setComposing(false)} onSaved={saved} />}{photoNote && <Dialog label={`Photo from ${photoNote.name}`} className="photo-dialog" onClose={() => setPhotoNote(null)}><img src={photoUrl(photoNote.id)} alt={`A photo shared by ${photoNote.name}`} /><div><span className="handwritten">with love, {photoNote.name}</span><p>{photoNote.body}</p></div></Dialog>}
-    {inviteOpen && <Dialog label="Team invite code" className="invite-dialog" onClose={() => setInviteOpen(false)}><Sparkles size={32} /><h2>You're on the list.</h2><form onSubmit={(event) => { event.preventDefault(); saveInvite(code.trim()); setInviteOpen(false); setToast('Code remembered for this visit. Try that heart again.') }}><label htmlFor="heart-invite">Team invite code</label><input id="heart-invite" type="password" value={code} onChange={(event) => setCode(event.target.value)} required /><button type="submit" className="button primary"><Check size={17} /> Let's go</button></form></Dialog>}
     <div className="toast-region" role="status" aria-live="polite"><AnimatePresence>{toast && <motion.div className="toast" key={toast} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}><Heart size={18} /><span>{toast}</span><button type="button" className="icon-button" onClick={() => setToast('')} aria-label="Dismiss notification"><X size={16} /></button></motion.div>}</AnimatePresence></div>
   </div></MotionConfig>
+}
+function App() {
+  return <AccessGate>{(session, onExit) => <Party inviteRequired={session.inviteRequired} onExit={onExit} />}</AccessGate>
 }
 export default App
