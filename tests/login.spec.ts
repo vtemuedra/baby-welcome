@@ -3,6 +3,33 @@ import sharp from 'sharp'
 
 test.use({ baseURL: `http://127.0.0.1:${Number(process.env.ATLAS_TEST_PORT || 8106) + 1}` })
 
+for (const width of [1440, 390]) {
+  test(`code visibility control only appears with input at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 })
+    await page.goto('/')
+    const code = page.getByLabel('Team invite code')
+    const toggle = page.getByRole('button', { name: /^(Show|Hide) code$/ })
+    await expect(code).toBeVisible()
+    await expect(toggle).toHaveCount(0)
+    const before = await code.boundingBox()
+    await code.pressSequentially('a')
+    await expect(page.getByRole('button', { name: 'Show code', exact: true })).toBeVisible()
+    expect(await code.boundingBox()).toEqual(before)
+    await code.press('Backspace')
+    await expect(toggle).toHaveCount(0)
+    await code.fill('example')
+    await page.getByRole('button', { name: 'Show code', exact: true }).click()
+    await expect(code).toHaveAttribute('type', 'text')
+    await expect(page.getByRole('button', { name: 'Hide code', exact: true })).toBeVisible()
+    await code.clear()
+    await expect(toggle).toHaveCount(0)
+    await expect(code).toHaveAttribute('type', 'password')
+    await code.fill('new example')
+    await expect(page.getByRole('button', { name: 'Show code', exact: true })).toBeVisible()
+    await expect(code).toHaveAttribute('type', 'password')
+  })
+}
+
 test('code-only login protects the board, remembers access, and signs out', async ({ page, context, browser }) => {
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Small human. Big welcome.' })).toBeVisible()
