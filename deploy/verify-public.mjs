@@ -16,6 +16,7 @@ const request = (route, options = {}) => fetch(`${base.href.replace(/\/$/, '')}$
   ...options, headers: { ...headers, ...options.headers }, signal: AbortSignal.timeout(30_000),
 })
 let messageId
+let otherCookies
 try {
   const health = await request('/health')
   assert.equal(health.status, 200)
@@ -23,10 +24,11 @@ try {
   assert.equal((await request('/messages')).status, 401)
   const session = await request('/session', { method: 'POST', body: JSON.stringify({ code: process.env.WRITE_KEY }) })
   assert.equal(session.status, 200)
-  const cookie = session.headers.get('set-cookie')
-  assert(cookie.includes('HttpOnly') && cookie.includes('Secure') && cookie.includes('SameSite=Strict'))
+  const cookies = session.headers.getSetCookie()
+  assert(cookies.some((cookie) => cookie.startsWith('atlas-owner=')))
+  assert(cookies.every((cookie) => cookie.includes('HttpOnly') && cookie.includes('Secure') && cookie.includes('SameSite=Strict')))
   assert.equal((await session.json()).token, undefined)
-  headers.Cookie = cookie.split(';')[0]
+  headers.Cookie = cookies.map((cookie) => cookie.split(';')[0]).join('; ')
   const image = await sharp(randomBytes(800 * 800 * 3), { raw: { width: 800, height: 800, channels: 3 } }).png().toBuffer()
   assert(image.length > 1024 * 1024)
   const result = await request('/messages', { method: 'POST', headers, body: JSON.stringify({
@@ -37,9 +39,10 @@ try {
   const { message } = await result.json()
   messageId = message.id
   assert.equal(message.hasPhoto, true)
+  assert.equal(message.canDelete, true)
   const listing = await request('/messages', { headers: { Origin: origin } })
   assert.equal(listing.headers.get('access-control-allow-origin'), origin)
-  assert((await listing.json()).messages.some((note) => note.id === messageId))
+  assert((await listing.json()).messages.some((note) => note.id === messageId && note.canDelete))
   const photo = await request(`/photos/${messageId}`)
   assert.equal(photo.status, 200)
   assert.equal(photo.headers.get('content-type'), 'image/webp')
@@ -51,7 +54,16 @@ try {
   })
   assert.equal(heart.status, 200)
   assert.equal((await heart.json()).hearts, 1)
-  console.log('PASS: same-site HTTPS login, secure HttpOnly cookie, protected upload above 1 MB, photo retrieval, and hearts.')
+  const otherSession = await request('/session', { method: 'POST', headers: { Cookie: '' }, body: JSON.stringify({ code: process.env.WRITE_KEY }) })
+  assert.equal(otherSession.status, 200)
+  otherCookies = otherSession.headers.getSetCookie().map((cookie) => cookie.split(';')[0]).join('; ')
+  const otherNotes = await request('/messages', { headers: { Cookie: otherCookies } })
+  assert.equal((await otherNotes.json()).messages.find((note) => note.id === messageId).canDelete, false)
+  assert.equal((await request(`/messages/${messageId}`, { method: 'DELETE', headers: { Cookie: otherCookies } })).status, 403)
+  assert.equal((await request(`/messages/${messageId}`, { method: 'DELETE' })).status, 200)
+  assert.equal((await request(`/photos/${messageId}`)).status, 404)
+  assert.equal(database.prepare('SELECT COUNT(*) AS total FROM hearts WHERE message_id = ?').get(messageId).total, 0)
+  console.log('PASS: live invite login, secure ownership cookies, photo upload, other-guest deletion denied, owner deletion, and photo/heart cleanup.')
 } finally {
   const removed = database.prepare('DELETE FROM messages WHERE name = ?').run(probeName)
   database.close()
@@ -60,5 +72,6 @@ try {
     await request('/session', { method: 'DELETE' })
     assert.equal((await request('/messages')).status, 401)
   }
+  if (otherCookies) await request('/session', { method: 'DELETE', headers: { Cookie: otherCookies } })
 }
 if (messageId) assert.equal((await request(`/photos/${messageId}`)).status, 401)

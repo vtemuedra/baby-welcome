@@ -119,3 +119,89 @@ test('shared notes, normalized photos, hearts, validation, and restart persisten
     await rm(dataDir, { recursive: true, force: true })
   }
 })
+
+test('only the posting browser can delete; ownership survives login and key changes; legacy notes stay unclaimed', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'atlas-owner-'))
+  const legacy = new DatabaseSync(path.join(dataDir, 'atlas.sqlite'))
+  legacy.exec(`CREATE TABLE messages (id TEXT PRIMARY KEY, name TEXT NOT NULL, body TEXT NOT NULL,
+    color TEXT NOT NULL, sticker TEXT NOT NULL, created_at TEXT NOT NULL, photo BLOB);
+    INSERT INTO messages VALUES ('legacy', 'Same name', 'An existing note', 'blue', 'star', '2026-09-10', NULL);`)
+  legacy.close()
+  let instance
+  let server
+  let base
+  async function start(key) {
+    instance = createApp({ dataDir, writeKey: key, trustProxy: 1 })
+    server = instance.app.listen(0, '127.0.0.1')
+    await new Promise((resolve) => server.once('listening', resolve))
+    base = `http://127.0.0.1:${server.address().port}/api`
+  }
+  async function stop() {
+    await new Promise((resolve) => server.close(resolve))
+    instance.close()
+  }
+  function guest() {
+    const cookies = new Map()
+    return {
+      cookies,
+      async request(route, method = 'GET', body) {
+        const response = await fetch(`${base}${route}`, { method,
+          headers: { 'Content-Type': 'application/json', 'X-Forwarded-Proto': 'https', Cookie: [...cookies].map(([name, value]) => `${name}=${value}`).join('; ') },
+          body: body === undefined ? undefined : JSON.stringify(body) })
+        response.headers.getSetCookie().forEach((cookie) => {
+          const [name, value] = cookie.split(';')[0].split('=')
+          cookies.set(name, value)
+        })
+        return response
+      },
+    }
+  }
+  const owner = guest()
+  const other = guest()
+  try {
+    await start('first-code')
+    const login = await owner.request('/session', 'POST', { code: 'first-code' })
+    const ownerCookie = login.headers.getSetCookie().find((cookie) => cookie.startsWith('atlas-owner='))
+    assert(ownerCookie.includes('HttpOnly') && ownerCookie.includes('Secure') && ownerCookie.includes('SameSite=Strict'))
+    const originalOwner = owner.cookies.get('atlas-owner')
+    await other.request('/session', 'POST', { code: 'first-code' })
+    const image = await sharp({ create: { width: 12, height: 12, channels: 3, background: '#f1c84e' } }).png().toBuffer()
+    const note = { name: 'Same name', body: 'My note', color: 'blue', sticker: 'heart', photo: `data:image/png;base64,${image.toString('base64')}` }
+    const { message } = await (await owner.request('/messages', 'POST', note)).json()
+    assert.equal(message.canDelete, true)
+    assert.equal(message.owner_hash, undefined)
+    await other.request('/messages', 'POST', { ...note, owner_hash: 'forged', visitorId: originalOwner })
+    const owned = (await (await owner.request('/messages')).json()).messages.find((item) => item.id === message.id)
+    assert.equal(owned.canDelete, true)
+    const others = (await (await other.request('/messages')).json()).messages
+    assert.equal(others.find((item) => item.id === message.id).canDelete, false)
+    assert.equal(others.find((item) => item.id === 'legacy').canDelete, false)
+    assert.equal((await other.request(`/messages/${message.id}`, 'DELETE', { owner: originalOwner, name: 'Same name' })).status, 403)
+    assert.equal((await owner.request('/messages/legacy', 'DELETE')).status, 403)
+    assert.equal((await owner.request('/messages/missing', 'DELETE')).status, 404)
+    await other.request(`/messages/${message.id}/heart`, 'PUT', { visitorId: randomUUID(), active: true })
+    await owner.request('/session', 'DELETE')
+    assert.equal((await owner.request(`/messages/${message.id}`, 'DELETE')).status, 401)
+    await stop()
+    await start('new-code')
+    assert.equal((await other.request('/messages')).status, 401)
+    await owner.request('/session', 'POST', { code: 'new-code' })
+    assert.equal(owner.cookies.get('atlas-owner'), originalOwner)
+    assert.equal((await (await owner.request('/messages')).json()).messages.find((item) => item.id === message.id).canDelete, true)
+    const withoutOwner = guest()
+    withoutOwner.cookies.set('atlas-session', owner.cookies.get('atlas-session'))
+    assert.equal((await withoutOwner.request(`/messages/${message.id}`, 'DELETE')).status, 403)
+    assert.equal((await owner.request(`/messages/${message.id}`, 'DELETE')).status, 200)
+    assert.equal((await owner.request(`/photos/${message.id}`)).status, 404)
+    const inspection = new DatabaseSync(path.join(dataDir, 'atlas.sqlite'))
+    assert.equal(inspection.prepare('SELECT COUNT(*) AS total FROM hearts WHERE message_id = ?').get(message.id).total, 0)
+    assert.equal(inspection.prepare("SELECT body FROM messages WHERE id = 'legacy'").get().body, 'An existing note')
+    inspection.close()
+    const remaining = (await (await owner.request('/messages')).json()).messages
+    assert.equal(remaining.length, 2)
+    assert(remaining.every((item) => !item.canDelete))
+  } finally {
+    if (server?.listening) await stop()
+    await rm(dataDir, { recursive: true, force: true })
+  }
+})

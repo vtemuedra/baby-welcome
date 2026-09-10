@@ -3,7 +3,7 @@ import type { FormEvent, ReactNode } from 'react'
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react'
 import { ArrowDown, ArrowUpRight, Check, ChevronDown, Flower2, Heart, ImagePlus, LoaderCircle, LogOut, PartyPopper, Pause, Play, Plus, Search, Send, Share2, Star, Trash2, X } from 'lucide-react'
 import confetti from 'canvas-confetti'
-import { getNotes, photoUrl, readPhoto, recall, remember, sendHeart, sendNote } from './lib/api'
+import { deleteNote, getNotes, photoUrl, readPhoto, recall, remember, sendHeart, sendNote } from './lib/api'
 import type { Draft, Note, NoteColor, Sticker } from './lib/api'
 import AccessGate from './AccessGate'
 import './App.css'
@@ -92,14 +92,32 @@ function Composer({ onClose, onSaved, inviteRequired }: { onClose: () => void; o
       </fieldset></form>
   </Dialog>
 }
-function NoteCard({ note, liked, onHeart, onPhoto }: { note: Note; liked: boolean; onHeart: () => Promise<void>; onPhoto: () => void }) {
+function DeleteNoteDialog({ note, onClose, onDeleted }: { note: Note; onClose: () => void; onDeleted: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  async function remove() {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try { await deleteNote(note.id); onDeleted() }
+    catch (cause) { setError((cause as Error).message); setBusy(false) }
+  }
+  return <Dialog label="Delete your note?" className="delete-dialog" onClose={() => { if (!busy) onClose() }}>
+    <Trash2 size={28} aria-hidden="true" />
+    <h2>Delete your note?</h2>
+    <p>{note.hasPhoto ? 'Your note and its photo will be removed from the board.' : 'Your note will be removed from the board.'} This can't be undone.</p>
+    {error && <p className="form-error" role="alert">{error}</p>}
+    <div className="delete-dialog-actions"><button type="button" className="button secondary" disabled={busy} onClick={onClose}>Keep it</button><button type="button" className="button primary" disabled={busy} onClick={() => void remove()}>{busy ? <LoaderCircle size={17} className="spin" /> : <Trash2 size={17} />}{busy ? 'Removing...' : 'Delete note'}</button></div>
+  </Dialog>
+}
+function NoteCard({ note, liked, onHeart, onPhoto, onDelete }: { note: Note; liked: boolean; onHeart: () => Promise<void>; onPhoto: () => void; onDelete: () => void }) {
   const [expanded, setExpanded] = useState(false)
   const [heartBusy, setHeartBusy] = useState(false)
   return <motion.article layout initial={{ opacity: 0, y: 22 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.4 }} className={`note-card paper-${note.color}`}>
     <div className="tape" aria-hidden="true" /><div className="note-topline"><span className="eyebrow">A LITTLE LOVE, JUST FOR YOU</span><StickerIcon type={note.sticker} /></div>
     {note.hasPhoto && <button className="note-photo" type="button" onClick={onPhoto} aria-label={`Open photo from ${note.name}`}><img src={photoUrl(note.id)} alt={`A photo shared by ${note.name}`} loading="lazy" /><span><Plus size={17} /></span></button>}
     <p className={`note-body ${expanded ? '' : 'is-clamped'}`}>{note.body}</p>{note.body.length > 240 && <button type="button" className="text-button read-more" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? 'A little less' : 'Read the whole note'} <ChevronDown size={14} /></button>}
-    <div className="note-footer"><div><span className="note-author">{note.name}</span><time dateTime={note.createdAt}>{dateFormat.format(new Date(note.createdAt))}</time></div><button type="button" className={`heart-button ${liked ? 'is-liked' : ''}`} disabled={heartBusy} aria-label={`${liked ? 'Remove love from' : 'Send love to'} ${note.name}'s note`} aria-pressed={liked} onClick={async () => { setHeartBusy(true); try { await onHeart() } finally { setHeartBusy(false) } }}><Heart size={17} /> <span>{note.hearts}</span></button></div>
+    <div className="note-footer"><div><span className="note-author">{note.name}</span><time dateTime={note.createdAt}>{dateFormat.format(new Date(note.createdAt))}</time></div><div className="note-actions">{note.canDelete && <button type="button" className="icon-button note-delete" title="Delete your note" aria-label="Delete your note" onClick={onDelete}><Trash2 size={16} /></button>}<button type="button" className={`heart-button ${liked ? 'is-liked' : ''}`} disabled={heartBusy} aria-label={`${liked ? 'Remove love from' : 'Send love to'} ${note.name}'s note`} aria-pressed={liked} onClick={async () => { setHeartBusy(true); try { await onHeart() } finally { setHeartBusy(false) } }}><Heart size={17} /> <span>{note.hearts}</span></button></div></div>
   </motion.article>
 }
 function Party({ inviteRequired, onExit }: { inviteRequired: boolean; onExit: () => Promise<void> }) {
@@ -111,6 +129,7 @@ function Party({ inviteRequired, onExit }: { inviteRequired: boolean; onExit: ()
   const [loadError, setLoadError] = useState('')
   const [composing, setComposing] = useState(false)
   const [photoNote, setPhotoNote] = useState<Note | null>(null)
+  const [deletingNote, setDeletingNote] = useState<Note | null>(null)
   const [leaving, setLeaving] = useState(false)
   const [filter, setFilter] = useState<'all' | 'photos'>('all')
   const [sort, setSort] = useState('newest')
@@ -161,6 +180,20 @@ function Party({ inviteRequired, onExit }: { inviteRequired: boolean; onExit: ()
       setLikedIds((current) => { const next = active ? [...current, note.id] : current.filter((id) => id !== note.id); remember('hearts', JSON.stringify(next)); return next })
     } catch (cause) { setToast((cause as Error).message) }
   }
+  function deleted(note: Note) {
+    loadVersion.current++
+    setLoading(false)
+    setNotes((current) => current.filter((item) => item.id !== note.id))
+    setLikedIds((current) => {
+      const next = current.filter((id) => id !== note.id)
+      remember('hearts', JSON.stringify(next))
+      return next
+    })
+    if (photoNote?.id === note.id) setPhotoNote(null)
+    setDeletingNote(null)
+    setToast('Your note has been removed.')
+    requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.board-heading > button')?.focus({ preventScroll: true }))
+  }
   async function share() {
     const url = new URL(location.href); url.hash = ''; url.search = ''
     try { if (navigator.share) await navigator.share({ title: 'Oh, hi Atlas!', text: 'A tiny human. A whole lot of love. Come celebrate Atlas, Natalie & Duke!', url: url.href }); else { await navigator.clipboard.writeText(url.href); setToast('Link copied. Bring the whole fan club.') } }
@@ -183,7 +216,7 @@ function Party({ inviteRequired, onExit }: { inviteRequired: boolean; onExit: ()
           <div className="board-tools"><label className="search-field"><Search size={16} /><input type="search" placeholder="Find a note" aria-label="Search notes" value={query} onChange={(event) => setQuery(event.target.value)} /></label><label className="sort-field"><span className="sr-only">Sort notes</span><select value={sort} onChange={(event) => setSort(event.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select><ChevronDown size={14} /></label></div></div>
         {loadError && <div className="load-error" role="alert"><span>{loadError}</span><button type="button" className="text-button" onClick={retryLoad}>Try again</button></div>}{loading && <div className="loading-notes" role="status"><LoaderCircle size={20} className="spin" /> Gathering the love...</div>}
         <div className="notes-grid">{showKeepsakes && <article className="note-card team-note paper-peach"><div className="tape" aria-hidden="true" /><div className="note-topline"><span className="eyebrow">THE VERY FIRST HELLO</span><StickerIcon type="heart" size={33} /></div><h3>Hey Atlas,<br /><em>we're your people, too.</em></h3><p>You hit the jackpot with Natalie and Duke. And now? A whole bonus crew cheering you all on.</p><p>To you both: sending so much love for the tiny yawns, the happy chaos, and all the little firsts with Atlas.</p><div className="team-signature"><span className="handwritten">big hugs, all round.</span><strong>MET Inventory & more</strong><span>Duke's work fam, cheering for you all</span></div></article>}
-          <AnimatePresence>{shown.map((note) => <NoteCard key={note.id} note={note} liked={likedIds.includes(note.id)} onHeart={() => heart(note)} onPhoto={() => setPhotoNote(note)} />)}</AnimatePresence>
+          <AnimatePresence>{shown.map((note) => <NoteCard key={note.id} note={note} liked={likedIds.includes(note.id)} onHeart={() => heart(note)} onPhoto={() => setPhotoNote(note)} onDelete={() => setDeletingNote(note)} />)}</AnimatePresence>
           {showKeepsakes && <article className="art-postcard" aria-label="A little keepsake: oh the places you'll grow"><div className="postcard-border"><span className="postcard-top">A LITTLE WISH FOR YOU</span><div className="garden" aria-hidden="true"><div className="garden-stem stem-one"><Flower2 /></div><div className="garden-stem stem-two"><Flower2 /></div><div className="garden-stem stem-three"><Flower2 /></div><Star className="garden-star" size={25} /></div><h3>oh, the places<br />you'll <em>grow.</em></h3><span className="postcard-bottom">STAY LITTLE. DREAM BIG.</span></div></article>}
           {showKeepsakes && <button type="button" className="add-note-tile" onClick={() => setComposing(true)}><span className="add-note-icon"><Plus size={31} strokeWidth={1.3} /></span><span className="handwritten">This little spot<br />has your name on it.</span><span className="add-note-label">Leave Atlas a note <ArrowUpRight size={17} /></span></button>}</div>
         {!loading && !loadError && !showKeepsakes && shown.length === 0 && <div className="empty-state"><Flower2 size={44} /><h3>{search ? 'No notes found, little detective.' : 'The first photo could be yours.'}</h3><p>{search ? 'Try another name or a different word.' : 'A familiar face. A favorite memory. A little piece of you.'}</p><button type="button" className="button secondary" onClick={() => search ? setQuery('') : setComposing(true)}>{search ? <X size={17} /> : <ImagePlus size={17} />}{search ? 'Clear search' : 'Add a photo note'}</button></div>}
@@ -191,6 +224,7 @@ function Party({ inviteRequired, onExit }: { inviteRequired: boolean; onExit: ()
       <section className="dedication" aria-labelledby="dedication-title"><span className="eyebrow">NATALIE & DUKE, THIS ONE'S FOR YOU</span><h2 id="dedication-title">Tiny socks.<br /><em>Big, big love.</em></h2><p>Here's to the sleepy cuddles, the happy little surprises,<br className="desktop-break" /> and finding your own rhythm together. No perfect-parent stuff.</p><span className="handwritten">You've got each other. We're cheering you both on.</span><Flower2 className="dedication-flower" aria-hidden="true" /></section></main>
     <footer className="site-footer"><a className="wordmark" href="#"><Flower2 size={23} /><span>hello, atlas.</span></a><span>Made of love. And a little bit of confetti.</span><span>MET Inventory & more <Heart size={13} /></span>{inviteRequired && <button type="button" className="icon-button" disabled={leaving} aria-label="Sign out" title="Sign out" onClick={async () => { setLeaving(true); try { await onExit() } catch { setToast("Couldn't sign out just now. Please try again."); setLeaving(false) } }}><LogOut size={17} /></button>}</footer>
     {composing && <Composer inviteRequired={inviteRequired} onClose={() => setComposing(false)} onSaved={saved} />}{photoNote && <Dialog label={`Photo from ${photoNote.name}`} className="photo-dialog" onClose={() => setPhotoNote(null)}><img src={photoUrl(photoNote.id)} alt={`A photo shared by ${photoNote.name}`} /><div><span className="handwritten">with love, {photoNote.name}</span><p>{photoNote.body}</p></div></Dialog>}
+    {deletingNote && <DeleteNoteDialog note={deletingNote} onClose={() => setDeletingNote(null)} onDeleted={() => deleted(deletingNote)} />}
     <div className="toast-region" role="status" aria-live="polite"><AnimatePresence>{toast && <motion.div className="toast" key={toast} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}><Heart size={18} /><span>{toast}</span><button type="button" className="icon-button" onClick={() => setToast('')} aria-label="Dismiss notification"><X size={16} /></button></motion.div>}</AnimatePresence></div>
   </div></MotionConfig>
 }

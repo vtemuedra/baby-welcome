@@ -123,8 +123,15 @@ not use `VITE_API_URL` or `VITE_BASE_PATH`.
   Text is rendered as text, never HTML.
 - Posting is limited to 12 notes per hour per IP; other writes to 30 per minute.
   This is a small-team guestbook, not a large public social network.
-- Guests cannot impersonate an administrator: removal is only available through
-  the server's command line. Names on notes are self-entered, not verified identities.
+- New notes can be removed from the browser that posted them, using the trash
+  button and a confirmation dialog. The server checks a private `atlas-owner`
+  cookie, not the displayed name or the shared invite code. The cookie lasts up
+  to one year and survives sign-out and invite-code changes. Clearing cookies,
+  switching browsers/devices, or using a different hostname loses that proof.
+  People sharing a browser also share ownership; this is not a verified account.
+- Older notes have no ownership record and cannot be claimed by entering a name.
+  The server owner can remove those through the command line. Deleting a note
+  removes its photo and hearts too, but not existing downloads or old backups.
 - Hearts are one per browser visitor ID, not one per verified person.
 - Fonts are loaded from Google Fonts. The 3D lettering asset is served locally.
 - No analytics or tracking pixels are included.
@@ -149,7 +156,7 @@ Use a new dated filename each time and keep a copy off the server.
 The backup includes notes, photos, and hearts. Treat it as private family data.
 For local use: `npm run manage -- backup backups/atlas-2026-09-09.sqlite`.
 
-To remove an unwanted note and its photo:
+For server-owner removal (including older notes), use the exact ID from `list`:
 
 ```sh
 docker compose exec atlas node server/manage.js list

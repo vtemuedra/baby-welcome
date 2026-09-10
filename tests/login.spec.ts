@@ -85,3 +85,83 @@ for (const width of [1440, 390, 320]) {
     await page.screenshot({ path: testInfo.outputPath(`invitation-${width}.png`), fullPage: true })
   })
 }
+
+for (const width of [1440, 390]) {
+  test(`only your own cards can be deleted at ${width}px`, async ({ page, context, browser }, testInfo) => {
+    await page.setViewportSize({ width, height: width === 1440 ? 1000 : 844 })
+    await page.goto('/')
+    await page.getByLabel('Team invite code').fill('browser-test-invite')
+    await page.getByRole('button', { name: 'Come on in' }).click()
+    await expect(page.locator('.team-note').getByRole('button', { name: 'Delete your note' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Leave a little love', exact: true }).click()
+    await page.getByLabel('Your name', { exact: true }).fill('The same guest name')
+    const ownBody = `My own removable note at ${width}px.`
+    const otherBody = `Another person's note at ${width}px.`
+    await page.getByLabel('Your little love note').fill(ownBody)
+    const photo = await sharp({ create: { width: 400, height: 300, channels: 3, background: '#d5e4ca' } }).png().toBuffer()
+    await page.getByLabel('Choose a photo').setInputFiles({ name: 'memory.png', mimeType: 'image/png', buffer: photo })
+    const posted = page.waitForResponse((response) => response.url().endsWith('/api/messages') && response.request().method() === 'POST')
+    await page.getByRole('button', { name: 'Send a little love', exact: true }).click()
+    const { message } = await (await posted).json()
+    const ownerCookie = (await context.cookies()).find((cookie) => cookie.name === 'atlas-owner')
+    expect(ownerCookie?.httpOnly).toBe(true)
+    expect(ownerCookie?.sameSite).toBe('Strict')
+    const otherContext = await browser.newContext()
+    const otherPage = await otherContext.newPage()
+    const base = new URL('/', page.url()).href
+    try {
+      await otherPage.goto(base)
+      await otherPage.getByLabel('Team invite code').fill('browser-test-invite')
+      await otherPage.getByRole('button', { name: 'Come on in' }).click()
+      const otherView = otherPage.locator('article').filter({ hasText: ownBody })
+      await expect(otherView).toBeVisible()
+      await expect(otherView.getByRole('button', { name: 'Delete your note' })).toHaveCount(0)
+      const forbidden = await otherContext.request.delete(new URL(`/api/messages/${message.id}`, base).href, {
+        data: { name: 'The same guest name', canDelete: true },
+      })
+      expect(forbidden.status()).toBe(403)
+      const otherPost = await otherContext.request.post(new URL('/api/messages', base).href, {
+        data: { name: 'The same guest name', body: otherBody, color: 'pink', sticker: 'heart' },
+      })
+      expect(otherPost.status()).toBe(201)
+      await page.reload()
+      const card = page.locator('article').filter({ hasText: ownBody })
+      const otherCard = page.locator('article').filter({ hasText: otherBody })
+      await expect(otherCard.getByRole('button', { name: 'Delete your note' })).toHaveCount(0)
+      await expect(card.getByRole('button', { name: 'Delete your note' })).toBeVisible()
+      await page.getByRole('button', { name: 'Sign out', exact: true }).click()
+      await page.getByLabel('Team invite code').fill('browser-test-invite')
+      await page.getByRole('button', { name: 'Come on in' }).click()
+      await expect(card.getByRole('button', { name: 'Delete your note' })).toBeVisible()
+      expect((await context.cookies()).find((cookie) => cookie.name === 'atlas-owner')?.value).toBe(ownerCookie?.value)
+      await card.getByRole('button', { name: 'Delete your note' }).click()
+      const confirmation = page.getByRole('dialog', { name: 'Delete your note?' })
+      await expect(confirmation).toContainText('note and its photo')
+      await confirmation.getByRole('button', { name: 'Keep it' }).click()
+      await expect(card).toBeVisible()
+      await expect(card.getByRole('button', { name: 'Delete your note' })).toBeFocused()
+      await card.getByRole('button', { name: 'Delete your note' }).click()
+      await page.keyboard.press('Escape')
+      await expect(confirmation).toHaveCount(0)
+      const route = `**/api/messages/${message.id}`
+      await page.route(route, (intercept) => intercept.request().method() === 'DELETE' ? intercept.abort() : intercept.continue())
+      await card.getByRole('button', { name: 'Delete your note' }).click()
+      await confirmation.getByRole('button', { name: 'Delete note', exact: true }).click()
+      await expect(confirmation.getByRole('alert')).toContainText("Can't reach")
+      await expect(card).toBeAttached()
+      expect(await confirmation.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+      await page.screenshot({ path: testInfo.outputPath(`delete-confirmation-${width}.png`) })
+      await page.unroute(route)
+      const before = Number(await page.locator('.filter-tabs > button').first().locator('span').textContent())
+      await confirmation.getByRole('button', { name: 'Delete note', exact: true }).click()
+      await expect(confirmation).toHaveCount(0)
+      await expect(card).toHaveCount(0)
+      await expect(page.locator('.filter-tabs > button').first().locator('span')).toHaveText(String(before - 1))
+      await expect(otherCard).toBeVisible()
+      expect((await context.request.get(new URL(`/api/photos/${message.id}`, base).href)).status()).toBe(404)
+      await page.reload()
+      await expect(otherCard).toBeVisible()
+      await expect(card).toHaveCount(0)
+    } finally { await otherContext.close() }
+  })
+}

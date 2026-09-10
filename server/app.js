@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -36,6 +36,9 @@ export function createApp({ dataDir, siteOrigin = '', writeKey = '', staticDir, 
       token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL
     );
   `)
+  if (!database.prepare('PRAGMA table_info(messages)').all().some((column) => column.name === 'owner_hash')) {
+    database.exec('ALTER TABLE messages ADD COLUMN owner_hash TEXT')
+  }
   const app = express()
   app.disable('x-powered-by')
   app.set('trust proxy', trustProxy)
@@ -60,6 +63,16 @@ export function createApp({ dataDir, siteOrigin = '', writeKey = '', staticDir, 
   })
   const sessionHash = (token) => createHmac('sha256', writeKey).update(token).digest('hex')
   const cookieOptions = (request) => ({ httpOnly: true, secure: request.secure, sameSite: 'strict', path: '/api' })
+  function ownerToken(request) {
+    const token = request.cookies['atlas-owner']
+    return typeof token === 'string' && /^[a-f0-9]{64}$/.test(token) ? token : ''
+  }
+  const hashOwner = (token) => token ? createHash('sha256').update(token).digest('hex') : null
+  function ensureOwner(request, response) {
+    const token = ownerToken(request) || randomBytes(32).toString('hex')
+    response.cookie('atlas-owner', token, { ...cookieOptions(request), maxAge: 365 * 24 * 60 * 60_000 })
+    return hashOwner(token)
+  }
   function sessionToken(request) {
     const token = request.cookies['atlas-session']
     return typeof token === 'string' && /^[a-f0-9]{64}$/.test(token) ? token : ''
@@ -83,6 +96,7 @@ export function createApp({ dataDir, siteOrigin = '', writeKey = '', staticDir, 
     if (typeof code !== 'string' || code.length > 512 || (writeKey && !matchesKey(code, writeKey))) {
       return response.status(401).json({ error: "That code isn't quite right. Try the one from the team." })
     }
+    ensureOwner(request, response)
     if (!writeKey) return response.json({ authenticated: true })
     database.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(Date.now())
     const token = randomBytes(32).toString('hex')
@@ -105,14 +119,15 @@ export function createApp({ dataDir, siteOrigin = '', writeKey = '', staticDir, 
   const selectMessages = database.prepare(`
     SELECT id, name, body, color, sticker, created_at AS createdAt,
       photo IS NOT NULL AS hasPhoto,
+      COALESCE(owner_hash = ?, 0) AS canDelete,
       (SELECT COUNT(*) FROM hearts WHERE message_id = messages.id) AS hearts
     FROM messages ORDER BY created_at DESC, rowid DESC
   `)
   function serialize(row) {
-    return { ...row, hasPhoto: Boolean(row.hasPhoto) }
+    return { ...row, hasPhoto: Boolean(row.hasPhoto), canDelete: Boolean(row.canDelete) }
   }
-  app.get('/api/messages', (_request, response) => {
-    response.json({ messages: selectMessages.all().map(serialize) })
+  app.get('/api/messages', (request, response) => {
+    response.json({ messages: selectMessages.all(hashOwner(ownerToken(request))).map(serialize) })
   })
   app.get('/api/photos/:id', (request, response) => {
     const message = database.prepare('SELECT photo FROM messages WHERE id = ?').get(request.params.id)
@@ -149,11 +164,22 @@ export function createApp({ dataDir, siteOrigin = '', writeKey = '', staticDir, 
       }
       const id = randomUUID()
       const createdAt = new Date().toISOString()
-      database.prepare('INSERT INTO messages (id, name, body, color, sticker, created_at, photo) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .run(id, name.trim(), body.trim(), color, sticker, createdAt, normalizedPhoto)
+      const ownerHash = ensureOwner(request, response)
+      database.prepare('INSERT INTO messages (id, name, body, color, sticker, created_at, photo, owner_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(id, name.trim(), body.trim(), color, sticker, createdAt, normalizedPhoto, ownerHash)
       response.status(201).json({ message: { id, name: name.trim(), body: body.trim(), color, sticker,
-        createdAt, hasPhoto: Boolean(normalizedPhoto), hearts: 0 } })
+        createdAt, hasPhoto: Boolean(normalizedPhoto), hearts: 0, canDelete: true } })
     } catch (error) { next(error) }
+  })
+  app.delete('/api/messages/:id', writes, (request, response) => {
+    const message = database.prepare('SELECT owner_hash FROM messages WHERE id = ?').get(request.params.id)
+    if (!message) return response.status(404).json({ error: 'That note is no longer here.' })
+    const ownerHash = hashOwner(ownerToken(request))
+    if (!ownerHash || message.owner_hash !== ownerHash) {
+      return response.status(403).json({ error: 'Only the browser that posted this note can remove it.' })
+    }
+    database.prepare('DELETE FROM messages WHERE id = ? AND owner_hash = ?').run(request.params.id, ownerHash)
+    response.json({ deleted: true })
   })
   app.put('/api/messages/:id/heart', writes, (request, response) => {
     const { visitorId, active } = request.body || {}

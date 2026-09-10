@@ -137,6 +137,15 @@
 .note-body.is-clamped:not(:has(+ .read-more)) { display: block; }
 .note-footer { border-top: 1px solid #57634b20; margin-top: 24px; padding-top: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .note-footer > div { min-width: 0; }
+.note-footer > .note-actions { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
+.note-delete { color: #8b675b; }
+.note-delete:hover { color: #a63f30; background: #ffffff75; }
+.delete-dialog { width: 410px; padding: 35px 28px 28px; }
+.delete-dialog > svg { color: var(--coral); margin-bottom: 15px; }
+.delete-dialog h2 { font: 500 29px / 1.2 var(--serif); margin-bottom: 13px; }
+.delete-dialog > p { font-size: 13px; line-height: 1.7; color: var(--muted); }
+.delete-dialog > .form-error { color: #a63729; margin: 15px 0 0; }
+.delete-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; margin-top: 25px; }
 .note-author { display: block; font-size: 12px; font-weight: 650; overflow-wrap: anywhere; }
 .note-footer time { font-size: 9px; color: #746f63; display: block; margin-top: 4px; }
 .heart-button { background: #ffffff60; min-width: 50px; height: 33px; padding: 0 10px; border-radius: 20px; display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 11px; color: #796b60; flex-shrink: 0; }

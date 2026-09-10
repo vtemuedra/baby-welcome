@@ -1,6 +1,6 @@
 export type NoteColor = 'peach' | 'blue' | 'yellow' | 'pink' | 'green'
 export type Sticker = 'heart' | 'star' | 'flower'
-export type Note = { id: string; name: string; body: string; color: NoteColor; sticker: Sticker; createdAt: string; hasPhoto: boolean; hearts: number }
+export type Note = { id: string; name: string; body: string; color: NoteColor; sticker: Sticker; createdAt: string; hasPhoto: boolean; hearts: number; canDelete: boolean }
 export type Draft = Pick<Note, 'name' | 'body' | 'color' | 'sticker'> & { photo?: string }
 const base = '/api'
 
@@ -36,6 +36,7 @@ export const photoUrl = (id: string) => `${base}/photos/${encodeURIComponent(id)
 export const sendNote = (draft: Draft) => request<{ message: Note }>('/messages', {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft),
 })
+export const deleteNote = (id: string) => request<{ deleted: boolean }>(`/messages/${encodeURIComponent(id)}`, { method: 'DELETE' })
 export const sendHeart = (id: string, active: boolean, visitorId: string) => request<{ hearts: number }>(`/messages/${id}/heart`, {
   method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ visitorId, active }),
 })

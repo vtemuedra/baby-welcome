@@ -52,6 +52,24 @@ cd ~/Docker/baby-welcome
 docker compose -f deploy/compose.server.yaml up -d --no-deps --force-recreate --wait atlas
 ```
 
+An ordinary container restart does not reload the compose environment file;
+recreation is required after editing `WRITE_KEY`. Refresh the browser and sign
+in with the new code afterward. Existing sessions are invalidated, while notes
+and photos stay intact. Keep the same named volume.
+
+New notes have a server-recorded owner hash derived from a random HttpOnly
+`atlas-owner` browser cookie. This cookie is separate from the login session and
+is not tied to `WRITE_KEY`, so changing the code or signing out does not lose
+ownership. Its lifetime is one year, refreshed on login or posting. The cookie
+is host-only: use the main `atlas.aboutvincent.com` address consistently.
+The server returns only a `canDelete` flag, never the owner hash or token.
+Deletion requires both a valid login and the posting browser's cookie.
+
+Ownership applies to new notes only. Existing notes remain unclaimed; names and
+heart visitor IDs are not accepted as proof. Guests clearing browser data or
+switching devices need the server owner to help remove a note. Shared browser
+profiles share this ownership, because guests do not have individual accounts.
+
 ## Deploy Updates
 
 Pushing `main` runs source checks, not an application deployment. GitHub Pages
@@ -104,7 +122,8 @@ cd ~/Docker/baby-welcome
 docker compose -f deploy/compose.server.yaml exec -T atlas node --input-type=module < deploy/verify-public.mjs
 ```
 
-For owner-requested removal, first list notes, then use the exact ID:
+Guests can remove their new notes using the trash icon and confirmation dialog.
+For server-owner removal or older notes, first list notes, then use the exact ID:
 
 ```sh
 docker compose -f deploy/compose.server.yaml exec -T atlas node server/manage.js list
