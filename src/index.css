@@ -1,0 +1,25 @@
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;600;700&family=DM+Sans:wght@400;450;500;550;600;650;700&family=Fraunces:ital,wght,SOFT,WONK@0,500,50,1;0,600,50,1;0,700,50,1;1,500,50,1;1,600,50,1&display=swap');
+:root { font-family: 'DM Sans', sans-serif; color: #303b33; background: #fafbf7; font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; --ink: #303b33; --muted: #68716a; --coral: #b74732; --coral-bright: #d4553d; --paper: #fafbf7; --serif: 'Fraunces', Georgia, serif; --hand: 'Caveat', cursive; --line: #dfe3d9; color-scheme: light; letter-spacing: 0; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 25px; }
+body { margin: 0; min-width: 320px; }
+button, input, textarea, select { font: inherit; color: inherit; letter-spacing: 0; }
+button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
+button, a { touch-action: manipulation; }
+button { cursor: pointer; border: 0; }
+button:disabled { cursor: not-allowed; opacity: 0.5; }
+a { color: inherit; text-decoration: none; }
+button, a { -webkit-user-select: none; user-select: none; }
+input, textarea { min-width: 0; }
+input, textarea, select { border-radius: 6px; }
+input, textarea { border: 1px solid #d3d9ce; padding: 12px 13px; background: #fffefa; outline: 0; }
+textarea { resize: vertical; min-height: 108px; }
+input:focus, textarea:focus, select:focus { border-color: #859b76; box-shadow: 0 0 0 3px #8eab7620; }
+input::placeholder, textarea::placeholder { color: #7c8076; font-weight: 400; }
+button:focus-visible, a:focus-visible, select:focus-visible, label:has(input:focus-visible) { outline: 3px solid #36654e; outline-offset: 4px; }
+h1, h2, h3, p { margin: 0; }
+svg { flex-shrink: 0; }
+img { max-width: 100%; display: block; }
+::selection { background: #f0c263; color: #303b33; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; } }

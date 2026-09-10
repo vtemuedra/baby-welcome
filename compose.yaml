@@ -1,0 +1,27 @@
+services:
+  atlas:
+    build: .
+    restart: unless-stopped
+    init: true
+    environment:
+      PORT: 8105
+      DATA_DIR: /app/data
+      SITE_ORIGIN: ${SITE_ORIGIN:?Set SITE_ORIGIN to the public site origin}
+      WRITE_KEY: ${WRITE_KEY:?Set a private team invite code in .env}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+    ports:
+      - "127.0.0.1:8105:8105"
+    volumes:
+      - atlas-data:/app/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+
+volumes:
+  atlas-data:
