@@ -1,0 +1,10 @@
+[Unit]
+Description=Snapshot Atlas before the nightly server backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+Unit=atlas-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -19,7 +19,11 @@ No font service or extra runtime dependency is needed for the balloon letters.
 
 ## Where the love lives
 
-**Recommended: GitHub Pages for the frontend, your Docker server for storage.**
+**Live: GitHub Pages for the frontend, your Docker server for storage.**
+Website: https://vtemuedra.github.io/baby-welcome/
+Storage API: https://atlas-api.aboutvincent.com/api
+See [the server runbook](deploy/README.md) for the installed stack and backups.
+
 GitHub Pages serves files; it cannot receive or store visitor uploads by itself.
 The small Node API stores messages, normalized photos, and hearts together in
 SQLite on a persistent Docker volume. No Firebase or external database account.
@@ -91,9 +95,17 @@ accidentally start in the open local-development mode.
 
 ## Publish to vtemuedra's GitHub Pages
 
-Source repository: https://github.com/vtemuedra/baby-welcome (private).
-The source is kept on GitHub; the public website and Docker storage service are
-not deployed yet. Pages builds are skipped until `VITE_API_URL` is configured.
+Source repository: https://github.com/vtemuedra/baby-welcome (public).
+GitHub Pages and the Docker storage service are deployed. The repository was
+made public with the owner's approval because the current GitHub plan does not
+support Pages for a private repository. Stored uploads and secrets remain on
+the server, not in GitHub.
+
+The current Pages configuration is:
+- `VITE_API_URL=https://atlas-api.aboutvincent.com/api`
+- `VITE_BASE_PATH=/baby-welcome/`
+
+To reproduce the setup:
 
 1. Deploy the Docker storage service and verify its HTTPS endpoint first.
   Data, environment secrets, backups, and test artifacts stay out of GitHub.
@@ -105,7 +117,7 @@ not deployed yet. Pages builds are skipped until `VITE_API_URL` is configured.
    For a custom Pages domain, set it to `/` and configure the domain in Pages.
 5. Run **Publish Atlas to GitHub Pages** or push to `main`.
 
-Future site URL, if Pages is enabled: https://vtemuedra.github.io/baby-welcome/.
+Live site URL: https://vtemuedra.github.io/baby-welcome/.
 Pages hosting from a private repository requires an eligible GitHub plan.
 A private source repository does not make a standard Pages site private.
 The all-in-one Docker option below does not require Pages or a paid GitHub plan.
@@ -137,6 +149,9 @@ No GitHub Pages deployment is needed in that case.
 
 The data is in the `atlas-data` Docker volume. Rebuilding or restarting the
 container keeps it. **Do not run `docker compose down -v`; it deletes the volume.**
+The installed server uses `deploy/compose.server.yaml`, so add
+`-f deploy/compose.server.yaml` to the compose commands below when running there.
+Its automatic snapshot and restore details are in [the server runbook](deploy/README.md).
 
 Create a consistent database backup while the app is running:
 
@@ -187,4 +202,5 @@ run the browser tests with `ATLAS_TEST_PORT=8116 npm run test:e2e`.
 Node currently labels its built-in SQLite API experimental. The app requires
 Node 24 and is tested with that runtime. The lazy-loaded Three.js bundle is
 large enough to trigger Vite's default size advisory; it loads separately from
-the usable board. Docker execution still needs to be checked on a Docker host.
+the usable board. The Linux Docker deployment passed its storage tests and a
+public HTTPS upload check. That check removed its synthetic note and photo.

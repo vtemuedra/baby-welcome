@@ -1,0 +1,44 @@
+name: baby-welcome
+
+services:
+  atlas:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: baby-welcome:local
+    restart: unless-stopped
+    init: true
+    env_file:
+      - ../.env
+    environment:
+      NODE_ENV: production
+      PORT: 8105
+      DATA_DIR: /app/data
+      TRUST_PROXY: '1'
+    ports:
+      - '127.0.0.1:8105:8105'
+    volumes:
+      - atlas-data:/app/data
+    networks:
+      docker-network:
+        aliases:
+          - atlas-api
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+
+volumes:
+  atlas-data:
+
+networks:
+  docker-network:
+    external: true
+    name: docker-network

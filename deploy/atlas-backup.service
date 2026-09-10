@@ -1,0 +1,7 @@
+[Unit]
+Description=Consistent Atlas message and photo database snapshot
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/usr/bin/bash %h/Docker/baby-welcome/deploy/backup-server.sh
