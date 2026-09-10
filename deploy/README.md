@@ -87,6 +87,9 @@ Never run `docker compose down -v`; it removes the stored messages and photos.
 
 ## Daily Backups
 
+The `family_photos` table is included in the same database snapshot as messages,
+photos, hearts, and sessions. There is no separate image folder to back up.
+
 The user service `atlas-backup.timer` runs daily at 03:30 in the server's time
 zone. It is enabled and uses `Persistent=true` to catch a missed run after restart.
 `backup-server.sh` creates a consistent SQLite snapshot while Atlas stays running,
@@ -111,6 +114,42 @@ To restore, stop Atlas, preserve the existing volume, and restore a snapshot's
 files. Restore the matching private environment separately, then start Atlas.
 
 ## Verification and Removal
+
+### Featured Family Photos
+
+The welcome album is separate from posted notes. Its listing and image URLs
+under `/api/family` require the existing login cookie and return no-store cache
+headers. Guests cannot delete featured family photos through the note API.
+
+Prepare a private import bundle on the machine with the originals:
+
+```sh
+mkdir -p .test-data
+node server/import-family.js prepare /path/to/original-photos .test-data/family-import.json
+```
+
+The selected filenames, captions, and alternative text are in
+`server/import-family.js`. Preparation auto-orients the photos, scales their
+longest side to at most 1,600 pixels, converts them to WebP, and strips metadata.
+Original files are not changed. A new bundle filename is required each time.
+
+Back up the server before importing. From a terminal with the private bundle,
+stream it directly into the running container:
+
+```sh
+ssh YOUR_SERVER 'cd "$HOME/Docker/baby-welcome" && docker compose -f deploy/compose.server.yaml exec -T atlas node server/import-family.js import -' < .test-data/family-import.json
+```
+
+Imports replace only matching album IDs, in one transaction. They do not delete
+other photos, notes, or sessions. Never commit a bundle or copy family photos
+into `public/`, `src/`, or the Docker build context. `.test-data/` is ignored by
+Git; remove temporary bundles after importing and verifying. New checkouts show
+no album until photos are imported. Browser tests use synthetic images by default;
+`ATLAS_FAMILY_BUNDLE` can point to a private bundle for local visual checks.
+
+To remove an album photo, the server owner can delete its exact ID from the
+`family_photos` table after backing up. Older backups and downloaded copies
+remain until removed separately.
 
 The public HTTPS smoke check runs inside the container, keeping `WRITE_KEY`
 inside that process. It verifies the login cookie's security flags, creates one

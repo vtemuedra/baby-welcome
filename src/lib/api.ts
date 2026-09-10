@@ -25,6 +25,9 @@ async function request<Result>(route: string, options?: RequestInit): Promise<Re
   return data
 }
 export const getNotes = () => request<{ messages: Note[] }>('/messages')
+export type FamilyPhoto = { id: string; caption: string; alt: string; width: number; height: number }
+export const getFamilyPhotos = () => request<{ photos: FamilyPhoto[] }>('/family')
+export const familyPhotoUrl = (id: string) => `${base}/family/${encodeURIComponent(id)}/photo`
 export const getHealth = () => request<{ inviteRequired: boolean }>('/health')
 export type Session = { authenticated: boolean; inviteRequired: boolean }
 export const getSession = () => request<Session>('/session')

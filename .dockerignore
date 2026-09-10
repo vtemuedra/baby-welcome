@@ -7,3 +7,4 @@ data
 backups
 test-results
 playwright-report
+.test-data

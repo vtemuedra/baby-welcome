@@ -35,6 +35,11 @@ export function createApp({ dataDir, siteOrigin = '', writeKey = '', staticDir, 
     CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS family_photos (
+      id TEXT PRIMARY KEY, caption TEXT NOT NULL, alt TEXT NOT NULL,
+      position INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL,
+      photo BLOB NOT NULL
+    );
   `)
   if (!database.prepare('PRAGMA table_info(messages)').all().some((column) => column.name === 'owner_hash')) {
     database.exec('ALTER TABLE messages ADD COLUMN owner_hash TEXT')
@@ -112,6 +117,15 @@ export function createApp({ dataDir, siteOrigin = '', writeKey = '', staticDir, 
     response.json({ authenticated: false })
   })
   app.use('/api', authorize, express.json({ limit: '9mb' }))
+  app.get('/api/family', (_request, response) => {
+    response.json({ photos: database.prepare('SELECT id, caption, alt, width, height FROM family_photos ORDER BY position, id').all() })
+  })
+  app.get('/api/family/:id/photo', (request, response) => {
+    const record = database.prepare('SELECT photo FROM family_photos WHERE id = ?').get(request.params.id)
+    if (!record) return response.status(404).json({ error: 'Photo not found.' })
+    response.set('Cache-Control', 'private, no-store')
+    response.type('webp').send(Buffer.from(record.photo))
+  })
   const writes = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false,
     message: { error: 'A little breather! Try again in a minute.' } })
   const uploads = rateLimit({ windowMs: 3_600_000, limit: 12, standardHeaders: 'draft-8', legacyHeaders: false,

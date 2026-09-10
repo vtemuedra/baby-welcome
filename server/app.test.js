@@ -120,6 +120,55 @@ test('shared notes, normalized photos, hearts, validation, and restart persisten
   }
 })
 
+test('family album is private, separate from notes, and survives restart and backup', async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'atlas-family-'))
+  let instance
+  let server
+  let base
+  let cookie
+  async function start() {
+    instance = createApp({ dataDir, writeKey: 'family-test' })
+    server = instance.app.listen(0, '127.0.0.1')
+    await new Promise((resolve) => server.once('listening', resolve))
+    base = `http://127.0.0.1:${server.address().port}/api`
+  }
+  async function stop() {
+    await new Promise((resolve) => server.close(resolve))
+    instance.close()
+  }
+  try {
+    await start()
+    const photo = await sharp({ create: { width: 20, height: 15, channels: 3, background: '#efb5cb' } }).webp().toBuffer()
+    const database = new DatabaseSync(path.join(dataDir, 'atlas.sqlite'))
+    database.prepare('INSERT INTO family_photos VALUES (?, ?, ?, ?, ?, ?, ?)').run('together', 'All the love.', 'The family together', 0, 20, 15, photo)
+    database.close()
+    assert.equal((await fetch(`${base}/family`)).status, 401)
+    assert.equal((await fetch(`${base}/family/together/photo`)).status, 401)
+    const login = await fetch(`${base}/session`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: 'family-test' }) })
+    cookie = login.headers.getSetCookie().map((value) => value.split(';')[0]).join('; ')
+    const get = (route) => fetch(`${base}${route}`, { headers: { Cookie: cookie } })
+    const album = await (await get('/family')).json()
+    assert.equal(album.photos.length, 1)
+    assert.equal(album.photos[0].photo, undefined)
+    assert.equal((await (await get('/messages')).json()).messages.length, 0)
+    assert.equal((await get('/family/missing/photo')).status, 404)
+    await stop()
+    await start()
+    const image = await get('/family/together/photo')
+    assert.equal(image.headers.get('cache-control'), 'private, no-store')
+    assert.equal(image.headers.get('content-type'), 'image/webp')
+    assert.equal((await sharp(Buffer.from(await image.arrayBuffer())).metadata()).width, 20)
+    const backupPath = path.join(dataDir, 'backup.sqlite')
+    await promisify(execFile)(process.execPath, ['server/manage.js', 'backup', backupPath], { env: { ...process.env, DATA_DIR: dataDir } })
+    const backup = new DatabaseSync(backupPath)
+    assert.equal(backup.prepare('SELECT COUNT(*) AS total FROM family_photos').get().total, 1)
+    backup.close()
+  } finally {
+    if (server?.listening) await stop()
+    await rm(dataDir, { recursive: true, force: true })
+  }
+})
+
 test('only the posting browser can delete; ownership survives login and key changes; legacy notes stay unclaimed', async () => {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'atlas-owner-'))
   const legacy = new DatabaseSync(path.join(dataDir, 'atlas.sqlite'))

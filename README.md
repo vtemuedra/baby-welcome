@@ -33,6 +33,19 @@ Messages are not stored only in the visitor's browser. Local storage holds only
 unfinished text drafts, a random visitor ID, heart selections, and motion preference.
 Photos and posted messages are shared through the server.
 
+## Family Album
+
+The signed-in welcome page includes a small album of Atlas, Natalie, and Duke,
+between the balloon greeting and the love board. Photos keep their full framing
+and open in a keyboard-accessible viewer. The album is separate from coworkers'
+notes and has no guest delete controls.
+
+Family photos live in the `family_photos` table in the same private SQLite
+database, so normal snapshots include them. Both `/api/family` and its image
+endpoints require login. The photos are not in `public/`, the app bundle, or
+GitHub. Imports correct camera orientation and remove EXIF/location metadata.
+See [the server runbook](deploy/README.md) for import and update commands.
+
 ## Run locally
 
 Requires Node 24.13 or later and npm.

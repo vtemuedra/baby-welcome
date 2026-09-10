@@ -1,11 +1,12 @@
 import { lazy, Suspense, useDeferredValue, useEffect, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react'
-import { ArrowDown, ArrowUpRight, Check, ChevronDown, Flower2, Heart, ImagePlus, LoaderCircle, LogOut, PartyPopper, Pause, Play, Plus, Search, Send, Share2, Star, Trash2, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Check, ChevronDown, Flower2, Heart, ImagePlus, LoaderCircle, LogOut, PartyPopper, Pause, Play, Plus, Search, Send, Share2, Star, Trash2, X } from 'lucide-react'
 import confetti from 'canvas-confetti'
-import { deleteNote, getNotes, photoUrl, readPhoto, recall, remember, sendHeart, sendNote } from './lib/api'
-import type { Draft, Note, NoteColor, Sticker } from './lib/api'
+import { deleteNote, familyPhotoUrl, getNotes, photoUrl, readPhoto, recall, remember, sendHeart, sendNote } from './lib/api'
+import type { Draft, FamilyPhoto, Note, NoteColor, Sticker } from './lib/api'
 import AccessGate from './AccessGate'
+import FamilyAlbum from './FamilyAlbum'
 import './App.css'
 
 const HeroScene = lazy(() => import('./HeroScene'))
@@ -92,6 +93,28 @@ function Composer({ onClose, onSaved, inviteRequired }: { onClose: () => void; o
       </fieldset></form>
   </Dialog>
 }
+function FamilyViewer({ photos, initialIndex, onClose }: { photos: FamilyPhoto[]; initialIndex: number; onClose: () => void }) {
+  const [index, setIndex] = useState(initialIndex)
+  const [failedId, setFailedId] = useState('')
+  const photo = photos[index]
+  function move(direction: number) { setIndex((current) => (current + direction + photos.length) % photos.length) }
+  useEffect(() => {
+    function navigate(event: KeyboardEvent) {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+      event.preventDefault()
+      const direction = event.key === 'ArrowLeft' ? -1 : 1
+      setIndex((current) => (current + direction + photos.length) % photos.length)
+    }
+    document.addEventListener('keydown', navigate)
+    return () => document.removeEventListener('keydown', navigate)
+  }, [photos.length])
+  return <Dialog label="Family album" className="family-viewer" onClose={onClose}>
+    <div className="family-viewer-body">
+      <div className="family-viewer-image">{failedId === photo.id ? <p role="alert">That photo couldn't load. Close the album and try again.</p> : <img key={photo.id} src={familyPhotoUrl(photo.id)} alt={photo.alt} width={photo.width} height={photo.height} onError={() => setFailedId(photo.id)} />}</div>
+      <div className="family-viewer-footer"><button type="button" className="icon-button" aria-label="Previous family photo" title="Previous photo" onClick={() => move(-1)}><ArrowLeft size={20} /></button><div aria-live="polite"><p className="handwritten">{photo.caption}</p><span>{index + 1} / {photos.length}</span></div><button type="button" className="icon-button" aria-label="Next family photo" title="Next photo" onClick={() => move(1)}><ArrowRight size={20} /></button></div>
+    </div>
+  </Dialog>
+}
 function DeleteNoteDialog({ note, onClose, onDeleted }: { note: Note; onClose: () => void; onDeleted: () => void }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -129,6 +152,7 @@ function Party({ inviteRequired, onExit }: { inviteRequired: boolean; onExit: ()
   const [loadError, setLoadError] = useState('')
   const [composing, setComposing] = useState(false)
   const [photoNote, setPhotoNote] = useState<Note | null>(null)
+  const [familySelection, setFamilySelection] = useState<{ photos: FamilyPhoto[]; index: number } | null>(null)
   const [deletingNote, setDeletingNote] = useState<Note | null>(null)
   const [leaving, setLeaving] = useState(false)
   const [filter, setFilter] = useState<'all' | 'photos'>('all')
@@ -211,6 +235,7 @@ function Party({ inviteRequired, onExit }: { inviteRequired: boolean; onExit: ()
       <div className="hero-side-note left-note" aria-hidden="true">tiny human,<br />very big deal.<span className="drawn-arrow"><ArrowDown size={35} strokeWidth={1} /></span></div><div className="adored-stamp" aria-hidden="true"><span>100%</span><span>adored</span><Heart size={15} fill="currentColor" /></div>
       <motion.div className="hero-bottom" initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.18 }}><h2>Small human. <em>Huge fan club.</em></h2><p>Natalie & Duke, what a little legend.<br />We're a little obsessed. And so happy for you both.</p><button className="button primary hero-cta" type="button" onClick={() => setComposing(true)}><Heart size={18} /> Leave a little love <ArrowUpRight size={18} /></button><div className="from-the-team"><span className="mini-flowers" aria-hidden="true"><Flower2 /><Star /><Heart /></span><span>with love, <strong>MET Inventory & more</strong></span></div></motion.div><span className="hero-edition" aria-hidden="true">ONE TINY, WONDERFUL BEGINNING</span><a className="scroll-invitation" href="#love-board" aria-label="Scroll to the love board"><ArrowDown size={20} /></a></section>
       <div className="party-ribbon" aria-hidden="true"><div>{Array.from({ length: 4 }, (_, index) => <span key={index}>BIG LOVE <Flower2 size={20} /> TINY SOCKS <Star size={19} /> BRAND NEW ADVENTURES <Heart size={20} /></span>)}</div></div>
+      <FamilyAlbum onOpen={(photos, index) => setFamilySelection({ photos, index })} />
       <section id="love-board" className="love-board" aria-labelledby="board-title"><div className="board-heading"><div><span className="eyebrow coral-text">THE OFFICIAL ATLAS FAN CLUB</span><h2 id="board-title">A whole lot of <em>love.</em><span className="heading-star" aria-hidden="true">*</span></h2><p>For Atlas, Natalie & Duke. And this lovely, messy new chapter.</p></div><button type="button" className="button secondary" onClick={() => setComposing(true)}><Plus size={18} /> Add your note</button></div>
         <div className="board-toolbar"><div className="filter-tabs" role="group" aria-label="Filter notes"><button type="button" aria-pressed={filter === 'all'} className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>All the love <span>{notes.length + 1}</span></button><button type="button" aria-pressed={filter === 'photos'} className={filter === 'photos' ? 'active' : ''} onClick={() => setFilter('photos')}>With photos <span>{notes.filter((note) => note.hasPhoto).length}</span></button></div>
           <div className="board-tools"><label className="search-field"><Search size={16} /><input type="search" placeholder="Find a note" aria-label="Search notes" value={query} onChange={(event) => setQuery(event.target.value)} /></label><label className="sort-field"><span className="sr-only">Sort notes</span><select value={sort} onChange={(event) => setSort(event.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select><ChevronDown size={14} /></label></div></div>
@@ -224,6 +249,7 @@ function Party({ inviteRequired, onExit }: { inviteRequired: boolean; onExit: ()
       <section className="dedication" aria-labelledby="dedication-title"><span className="eyebrow">NATALIE & DUKE, THIS ONE'S FOR YOU</span><h2 id="dedication-title">Tiny socks.<br /><em>Big, big love.</em></h2><p>Here's to the sleepy cuddles, the happy little surprises,<br className="desktop-break" /> and finding your own rhythm together. No perfect-parent stuff.</p><span className="handwritten">You've got each other. We're cheering you both on.</span><Flower2 className="dedication-flower" aria-hidden="true" /></section></main>
     <footer className="site-footer"><a className="wordmark" href="#"><Flower2 size={23} /><span>hello, atlas.</span></a><span>Made of love. And a little bit of confetti.</span><span>MET Inventory & more <Heart size={13} /></span>{inviteRequired && <button type="button" className="icon-button" disabled={leaving} aria-label="Sign out" title="Sign out" onClick={async () => { setLeaving(true); try { await onExit() } catch { setToast("Couldn't sign out just now. Please try again."); setLeaving(false) } }}><LogOut size={17} /></button>}</footer>
     {composing && <Composer inviteRequired={inviteRequired} onClose={() => setComposing(false)} onSaved={saved} />}{photoNote && <Dialog label={`Photo from ${photoNote.name}`} className="photo-dialog" onClose={() => setPhotoNote(null)}><img src={photoUrl(photoNote.id)} alt={`A photo shared by ${photoNote.name}`} /><div><span className="handwritten">with love, {photoNote.name}</span><p>{photoNote.body}</p></div></Dialog>}
+    {familySelection && <FamilyViewer photos={familySelection.photos} initialIndex={familySelection.index} onClose={() => setFamilySelection(null)} />}
     {deletingNote && <DeleteNoteDialog note={deletingNote} onClose={() => setDeletingNote(null)} onDeleted={() => deleted(deletingNote)} />}
     <div className="toast-region" role="status" aria-live="polite"><AnimatePresence>{toast && <motion.div className="toast" key={toast} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}><Heart size={18} /><span>{toast}</span><button type="button" className="icon-button" onClick={() => setToast('')} aria-label="Dismiss notification"><X size={16} /></button></motion.div>}</AnimatePresence></div>
   </div></MotionConfig>
